@@ -1,31 +1,16 @@
 require("dotenv").config();
 
-const express =
-require("express");
+const express = require("express");
+const mongoose = require("mongoose");
+const multer = require("multer");
+const cors = require("cors");
+const jwt = require("jsonwebtoken");
+const path = require("path");
+const fs = require("fs");
 
-const mongoose =
-require("mongoose");
+const Order = require("./models/Order");
 
-const multer =
-require("multer");
-
-const cors =
-require("cors");
-
-const jwt =
-require("jsonwebtoken");
-
-const path =
-require("path");
-
-const fs =
-require("fs");
-
-const Order =
-require("./models/Order");
-
-const app =
-express();
+const app = express();
 
 
 
@@ -36,72 +21,54 @@ app.use(cors());
 
 app.use(express.json());
 
-app.use(express.urlencoded({
-    extended:true
-}));
+app.use(
+    express.urlencoded({
+        extended: true
+    })
+);
 
 
 
 // ==========================
 // UPLOADS FOLDER
 // ==========================
-if(
-!fs.existsSync("uploads")
-){
+const uploadsPath =
+path.join(__dirname, "uploads");
 
-    fs.mkdirSync(
-    "uploads"
-    );
+if (!fs.existsSync(uploadsPath)) {
+
+    fs.mkdirSync(uploadsPath, {
+        recursive: true
+    });
 
 }
 
 
 
 // ==========================
-// STATIC UPLOADS
+// STATIC FILES
 // ==========================
 app.use(
-
-"/uploads",
-
-express.static(
-
-path.join(
-__dirname,
-"uploads"
-)
-
-)
-
+    "/uploads",
+    express.static(uploadsPath)
 );
 
 
 
 // ==========================
-// MONGODB
+// MONGODB CONNECT
 // ==========================
-mongoose.connect(
+mongoose.connect(process.env.MONGO_URI)
 
-process.env.MONGO_URI,
+.then(() => {
 
-{
-    useNewUrlParser:true,
-    useUnifiedTopology:true
-}
-
-)
-
-.then(()=>{
-
-    console.log(
-    "MongoDB Connected"
-    );
+    console.log("MongoDB Connected");
 
 })
 
-.catch((err)=>{
+.catch((err) => {
 
-    console.log(err);
+    console.log("MongoDB Error:", err);
 
 });
 
@@ -110,37 +77,24 @@ process.env.MONGO_URI,
 // ==========================
 // STORAGE
 // ==========================
-const storage =
-multer.diskStorage({
+const storage = multer.diskStorage({
 
-    destination:
-    (req,file,cb)=>{
+    destination: (req, file, cb) => {
 
-        cb(
-        null,
-        "uploads/"
-        );
+        cb(null, uploadsPath);
 
     },
 
-    filename:
-    (req,file,cb)=>{
+    filename: (req, file, cb) => {
 
         const uniqueName =
 
-        Date.now() +
-        "-" +
-        Math.floor(
-        Math.random() * 999999
-        ) +
-        path.extname(
-        file.originalname
-        );
+            Date.now() +
+            "-" +
+            Math.floor(Math.random() * 999999) +
+            path.extname(file.originalname);
 
-        cb(
-        null,
-        uniqueName
-        );
+        cb(null, uniqueName);
 
     }
 
@@ -151,41 +105,28 @@ multer.diskStorage({
 // ==========================
 // FILE FILTER
 // ==========================
-const fileFilter =
-(req,file,cb)=>{
+const fileFilter = (req, file, cb) => {
 
     const allowed = [
 
         "image/png",
-
         "image/jpeg",
-
         "image/jpg",
-
         "image/webp"
 
     ];
 
-    if(
-    allowed.includes(
-    file.mimetype
-    )
-    ){
+    if (allowed.includes(file.mimetype)) {
 
-        cb(null,true);
+        cb(null, true);
 
     }
 
-    else{
+    else {
 
         cb(
-
-        new Error(
-        "Only image files allowed"
-        ),
-
-        false
-
+            new Error("Only image files allowed"),
+            false
         );
 
     }
@@ -197,17 +138,116 @@ const fileFilter =
 // ==========================
 // MULTER
 // ==========================
-const upload =
-multer({
+const upload = multer({
 
     storage,
 
     fileFilter,
 
-    limits:{
-        fileSize:
-        5 * 1024 * 1024
+    limits: {
+        fileSize: 5 * 1024 * 1024
     }
+
+});
+
+
+
+// ==========================
+// AUTH MIDDLEWARE
+// ==========================
+const verifyToken = (req, res, next) => {
+
+    try {
+
+        const authHeader =
+        req.headers.authorization;
+
+        if (!authHeader) {
+
+            return res.status(401).json({
+
+                success: false,
+                message: "No token"
+
+            });
+
+        }
+
+        const token =
+        authHeader.split(" ")[1];
+
+        jwt.verify(
+
+            token,
+
+            process.env.JWT_SECRET,
+
+            (err, decoded) => {
+
+                if (err) {
+
+                    return res.status(403).json({
+
+                        success: false,
+                        message: "Invalid token"
+
+                    });
+
+                }
+
+                req.user = decoded;
+
+                next();
+
+            }
+
+        );
+
+    }
+
+    catch (err) {
+
+        res.status(500).json({
+
+            success: false,
+            message: "Auth error"
+
+        });
+
+    }
+
+};
+
+
+
+// ==========================
+// ROOT ROUTE
+// ==========================
+app.get("/", (req, res) => {
+
+    res.json({
+
+        success: true,
+        backend: "Amertak Backend",
+        status: "online"
+
+    });
+
+});
+
+
+
+// ==========================
+// HEALTH ROUTE
+// ==========================
+app.get("/health", (req, res) => {
+
+    res.json({
+
+        success: true,
+        status: "healthy"
+
+    });
 
 });
 
@@ -216,13 +256,9 @@ multer({
 // ==========================
 // ADMIN LOGIN
 // ==========================
-app.post(
+app.post("/admin-login", async (req, res) => {
 
-"/admin-login",
-
-async(req,res)=>{
-
-    try{
+    try {
 
         const {
 
@@ -234,21 +270,36 @@ async(req,res)=>{
 
 
         // ==========================
-        // PASSWORD CHECK
+        // VALIDATION
         // ==========================
-        if(
-
-        password !==
-        "@amertakAdmin123"
-
-        ){
+        if (!email || !password) {
 
             return res.json({
 
-                success:false,
+                success: false,
+                message: "Missing fields"
 
-                message:
-                "Wrong password"
+            });
+
+        }
+
+
+
+        // ==========================
+        // ADMIN CHECK
+        // ==========================
+        if (
+
+            email !== process.env.ADMIN_EMAIL ||
+
+            password !== process.env.ADMIN_PASSWORD
+
+        ) {
+
+            return res.json({
+
+                success: false,
+                message: "Invalid credentials"
 
             });
 
@@ -259,8 +310,7 @@ async(req,res)=>{
         // ==========================
         // TOKEN
         // ==========================
-        const token =
-        jwt.sign(
+        const token = jwt.sign(
 
             {
                 email
@@ -269,7 +319,7 @@ async(req,res)=>{
             process.env.JWT_SECRET,
 
             {
-                expiresIn:"7d"
+                expiresIn: "7d"
             }
 
         );
@@ -278,24 +328,21 @@ async(req,res)=>{
 
         res.json({
 
-            success:true,
-
+            success: true,
             token
 
         });
 
     }
 
-    catch(err){
+    catch (err) {
 
         console.log(err);
 
         res.json({
 
-            success:false,
-
-            message:
-            "Server Error"
+            success: false,
+            message: "Server error"
 
         });
 
@@ -310,115 +357,105 @@ async(req,res)=>{
 // ==========================
 app.post(
 
-"/submit-order",
+    "/submit-order",
 
-upload.single("image"),
+    upload.single("image"),
 
-async(req,res)=>{
+    async (req, res) => {
 
-    try{
+        try {
 
-        // ==========================
-        // VALIDATION
-        // ==========================
-        if(
-        !req.body.username
-        ){
+            const {
 
-            return res.json({
+                username,
+                rank
 
-                success:false,
+            } = req.body;
 
-                message:
-                "Username required"
+
+
+            // ==========================
+            // VALIDATION
+            // ==========================
+            if (!username) {
+
+                return res.json({
+
+                    success: false,
+                    message: "Username required"
+
+                });
+
+            }
+
+            if (!rank) {
+
+                return res.json({
+
+                    success: false,
+                    message: "Rank required"
+
+                });
+
+            }
+
+            if (!req.file) {
+
+                return res.json({
+
+                    success: false,
+                    message: "Invoice required"
+
+                });
+
+            }
+
+
+
+            // ==========================
+            // SAVE ORDER
+            // ==========================
+            const newOrder = new Order({
+
+                username,
+
+                rank,
+
+                image: req.file.filename,
+
+                status: "pending"
+
+            });
+
+            await newOrder.save();
+
+
+
+            res.json({
+
+                success: true,
+                message: "Order submitted"
 
             });
 
         }
 
-        if(
-        !req.body.rank
-        ){
+        catch (err) {
 
-            return res.json({
+            console.log(err);
 
-                success:false,
+            res.json({
 
-                message:
-                "Rank required"
+                success: false,
+                message: "Upload failed"
 
             });
 
         }
-
-        if(
-        !req.file
-        ){
-
-            return res.json({
-
-                success:false,
-
-                message:
-                "Invoice required"
-
-            });
-
-        }
-
-
-
-        // ==========================
-        // SAVE ORDER
-        // ==========================
-        const newOrder =
-        new Order({
-
-            username:
-            req.body.username,
-
-            rank:
-            req.body.rank,
-
-            image:
-            req.file.filename,
-
-            status:
-            "pending"
-
-        });
-
-        await newOrder.save();
-
-
-
-        res.json({
-
-            success:true,
-
-            message:
-            "Order submitted"
-
-        });
 
     }
 
-    catch(err){
-
-        console.log(err);
-
-        res.json({
-
-            success:false,
-
-            message:
-            "Upload failed"
-
-        });
-
-    }
-
-});
+);
 
 
 
@@ -427,36 +464,39 @@ async(req,res)=>{
 // ==========================
 app.get(
 
-"/orders",
+    "/orders",
 
-async(req,res)=>{
+    verifyToken,
 
-    try{
+    async (req, res) => {
 
-        const orders =
-        await Order.find()
+        try {
 
-        .sort({
+            const orders =
 
-            createdAt:-1
+            await Order.find()
 
-        });
+            .sort({
 
-        res.json(
-        orders
-        );
+                createdAt: -1
+
+            });
+
+            res.json(orders);
+
+        }
+
+        catch (err) {
+
+            console.log(err);
+
+            res.json([]);
+
+        }
 
     }
 
-    catch(err){
-
-        console.log(err);
-
-        res.json([]);
-
-    }
-
-});
+);
 
 
 
@@ -465,54 +505,71 @@ async(req,res)=>{
 // ==========================
 app.post(
 
-"/update-status",
+    "/update-status",
 
-async(req,res)=>{
+    verifyToken,
 
-    try{
+    async (req, res) => {
 
-        const {
+        try {
 
-            id,
-            status
+            const {
 
-        } = req.body;
-
-
-
-        await Order.findByIdAndUpdate(
-
-            id,
-
-            {
+                id,
                 status
+
+            } = req.body;
+
+
+
+            if (!id || !status) {
+
+                return res.json({
+
+                    success: false,
+                    message: "Missing fields"
+
+                });
+
             }
 
-        );
+
+
+            await Order.findByIdAndUpdate(
+
+                id,
+
+                {
+                    status
+                }
+
+            );
 
 
 
-        res.json({
+            res.json({
 
-            success:true
+                success: true
 
-        });
+            });
+
+        }
+
+        catch (err) {
+
+            console.log(err);
+
+            res.json({
+
+                success: false
+
+            });
+
+        }
 
     }
 
-    catch(err){
-
-        console.log(err);
-
-        res.json({
-
-            success:false
-
-        });
-
-    }
-
-});
+);
 
 
 
@@ -521,76 +578,91 @@ async(req,res)=>{
 // ==========================
 app.delete(
 
-"/delete-order/:id",
+    "/delete-order/:id",
 
-async(req,res)=>{
+    verifyToken,
 
-    try{
+    async (req, res) => {
 
-        const order =
-        await Order.findById(
-        req.params.id
-        );
+        try {
 
+            const order =
 
-
-        if(order){
-
-            const imagePath =
-
-            path.join(
-
-                __dirname,
-
-                "uploads",
-
-                order.image
-
+            await Order.findById(
+                req.params.id
             );
 
 
 
-            if(
-            fs.existsSync(
-            imagePath
-            )
-            ){
+            if (order) {
 
-                fs.unlinkSync(
-                imagePath
+                const imagePath =
+
+                path.join(
+
+                    uploadsPath,
+
+                    order.image
+
+                );
+
+
+
+                if (fs.existsSync(imagePath)) {
+
+                    fs.unlinkSync(imagePath);
+
+                }
+
+
+
+                await Order.findByIdAndDelete(
+
+                    req.params.id
+
                 );
 
             }
 
 
 
-            await Order.findByIdAndDelete(
-            req.params.id
-            );
+            res.json({
+
+                success: true
+
+            });
 
         }
 
+        catch (err) {
 
+            console.log(err);
 
-        res.json({
+            res.json({
 
-            success:true
+                success: false
 
-        });
+            });
 
-    }
-
-    catch(err){
-
-        console.log(err);
-
-        res.json({
-
-            success:false
-
-        });
+        }
 
     }
+
+);
+
+
+
+// ==========================
+// INVALID ROUTE
+// ==========================
+app.use((req, res) => {
+
+    res.status(404).json({
+
+        success: false,
+        message: "Route not found"
+
+    });
 
 });
 
@@ -602,12 +674,12 @@ async(req,res)=>{
 const PORT =
 process.env.PORT || 3000;
 
-app.listen(PORT,()=>{
+app.listen(PORT, () => {
 
     console.log(
 
-    "Server running on port " +
-    PORT
+        "Server running on port " +
+        PORT
 
     );
 
